@@ -1,0 +1,557 @@
+---
+title: "White Wine Quality"
+subtitle: 'Capstone: Choose Your Own'
+author: "Luis D. Torres"
+date: "12/28/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  message = FALSE,
+	warning = FALSE)
+```
+
+# Introduction
+
+In this work, three machine learning techniques are used to determine dependency of white wine quality on eleven wine characteristic. Machine learning techniques are compared by calculating the level of accuracy of the model.
+
+The wine quality dataset is used in this report. The wine dataset is a collection of white and red wines. The dataset is publicly available at https://archive.ics.uci.edu/ml/datasets/wine+quality. 
+
+This report uses only the white wine data as it includes more observations.
+
+This report is structured in three sections. The next section explains the methods and analysis used including data cleaning, data exploration and visualization, and the modelling approach. The results section presents the modelling results and discusses the model performance. The final section gives a brief summary of the report, its limitations and future work.
+
+# Methodology
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+
+library(tidyverse)
+library(caret)
+library(data.table)
+
+options(digits = 3) # decimal points to 3
+```
+
+## Datasets
+
+Wine quality dataset is used in this report. Wine dataset is a collection of white and red wines. This report uses only the white wine data with 4898 observations.
+
+The white wine quality dataset can be download at https://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality-white.csv
+
+A summary of the variables included in this dataset is provided below:
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+url_data <- "https://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality-white.csv"
+
+wine_quality_data <- read.csv2(url_data)
+
+rm(url_data)
+
+# Transforming variables into numeric to facilitate analysis
+
+wine_quality_data[,1:12] <- lapply(wine_quality_data[,1:12], as.numeric)
+lapply(wine_quality_data, class)
+
+# Inspecting wine_quality_data
+
+if(!require(psych)) install.packages("psych", repos = "http://cran.us.r-project.org")
+library(psych)
+describe(wine_quality_data) %>% select(n, mean, sd, median, min, max) %>% knitr::kable("pipe", digits = 2)
+
+```
+
+The dataset was divided in two main subsets:
+1. Training: 80% of the white wine quality dataset. Total observations of 3,918
+2. Validation: 20% of white wine quality dataset. Total observations of 980
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+# Partitioning the data intro training and validation. Validation set will be 20% of wine_quality_data
+
+set.seed(1, sample.kind="Rounding")
+
+index <- createDataPartition(y = wine_quality_data$quality, times = 1, p = 0.2, list = FALSE)
+training <- wine_quality_data[-index,]
+validation <- wine_quality_data[index,]
+rm(index)# remove index
+
+```
+
+All models were trained on the **Training** dataset. To facilitate model comparison and reduce the risk of over-training, **Training** was further partitioned into _train_ (80% of Training) and _test_ (20% of Training). 
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+########################## Working with the training set ############################
+
+# Partitioning the training set into train and test. Test is the 20% of the training dataset
+
+set.seed(1, sample.kind="Rounding")
+
+index <- createDataPartition(y = training$quality, times = 1, p = 0.2, list = FALSE)
+train <- training[-index,]
+test <- training[index,]
+rm(index)# remove index
+
+```
+
+The **Validation** dataset was not used for training purposes. This set was used only for full validation. This implies testing the final and best performing algorithm.
+
+## Variables (train set)
+
+The summary of the variables included in the train dataset are summarised below:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+if(!require(psych)) install.packages("psych", repos = "http://cran.us.r-project.org")
+library(psych)
+describe(train) %>% select(n, mean, sd, median, min, max) %>% knitr::kable("pipe", digits = 2)
+```
+
+### Outcome variable: Quality
+
+The wine _quality_ rating is an ordinal variable based on a sensory test carried out by at least three sommeliers and scaled in 10 quality classes from **0** - _very bad_ to **10** - _very excellent_.  
+
+By exploring the train dataset, wine quality do not include values of 1, 2 and 10. Most values are around 5, 6 and 7 as showed on the graph below:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+## reviewing the outcome variable
+
+library(ggplot2)
+wine_quality_raw <- ggplot(train, aes(x=factor(quality))) + 
+  geom_bar() + 
+  xlab("Wine quality")
+
+wine_quality_raw
+```
+
+### Features (predictors)
+
+The wine quality dataset included 11 continuous variables that can be used as predictors of wine quality ratings: _fixed acidity_, _volatile acidity_, _citric acid_, _residual sugar_, _chlorides_, _free sulphur dioxide_, _total sulphur dioxide_, _density_, _pH_, _sulphates_, _alcohol_.
+
+Preprocessing was implemented on the set of predictors. Variables with zero variability can represent a problem for the machine learning algorithms. Therefore, variability was tested for all predictors. As showed on the table below, zero variability is not a problem in this set of variables so all variables can be included in the analysis:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+## checking that the predictors have enough variability 
+
+predictors <- train %>% select(fixed.acidity, volatile.acidity, citric.acid, residual.sugar,
+                               chlorides, free.sulfur.dioxide, total.sulfur.dioxide, density, pH, 
+                               sulphates, alcohol) %>% as.matrix()
+
+nzv <- caret::nearZeroVar(predictors, saveMetrics= TRUE, names = TRUE)
+nzv %>% select(zeroVar) %>% knitr::kable("pipe", digits = 2) # no zero variation variables
+```
+
+## Data analysis
+
+Analysis were performed using R version 4.0.3 and RStudio version 1.3.959. The following R packages were used: _tidyverse_, _data.table_, and _psych_ for data manipulation and visualisation; and the _caret_ for building three machine learning algorithms: _k-nearest neighbours_, _decision trees_, and _random forests_. 
+
+This report uses _overall accuracy_ as the main indicator to compare models and their predictive value. This is the overall proportion of cases that were correctly predicted. The model should aim at an _overall accuracy_ value closer to 1.
+
+Bootstrap-based cross validation is used to optimise the machine learning algorithm parameters. This facilitates choosing the parameters with the highest _overall accuracy_ while reducing the risk of over-training. 
+
+### Data transformations and model fitting
+
+The outcome variable (quality) was used in two different ways:
+1. Raw (quality): no transformation was implemented 
+2. Transformed (levels): raw ratings were transformed into three levels as follows:
+ * Bad = ratings 1 to 4
+ * Medium = ratings 5 and 6
+ * Good = ratings 7 to 10
+A new variable called "levels" was added to all datasets. 
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# Transforming the outcome variable
+
+train <- train %>% mutate(levels = recode(quality, 
+                                 "1" = "bad",
+                                 "2" = "bad",
+                                 "3" = "bad",
+                                 "4" = "bad",
+                                 "5" = "medium",
+                                 "6" = "medium",
+                                 "7" = "good",
+                                 "8" = "good",
+                                 "9" = "good",
+                                 "10" = "good")) # for training
+
+test <- test %>% mutate(levels = recode(quality, 
+                                          "1" = "bad",
+                                          "2" = "bad",
+                                          "3" = "bad",
+                                          "4" = "bad",
+                                          "5" = "medium",
+                                          "6" = "medium",
+                                          "7" = "good",
+                                          "8" = "good",
+                                          "9" = "good",
+                                          "10" = "good")) # same for test
+
+validation <- validation %>% mutate(levels = recode(quality, 
+                                        "1" = "bad",
+                                        "2" = "bad",
+                                        "3" = "bad",
+                                        "4" = "bad",
+                                        "5" = "medium",
+                                        "6" = "medium",
+                                        "7" = "good",
+                                        "8" = "good",
+                                        "9" = "good",
+                                        "10" = "good")) # same for validation
+
+```
+
+The distribution of observations for the raw and transformed outcome variables in showed in the figure below:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+library(ggplot2)
+wine_quality_levels <- ggplot(train, aes(x=factor(levels, level = c('bad', 'medium', 'good')))) + 
+  geom_bar() + 
+  xlab("Wine quality levels")
+
+library(gridExtra)
+grid.arrange(wine_quality_raw, wine_quality_levels, ncol=2)
+
+```
+
+The three machine learning algorithms were fitted to the raw and transformed outcome variable.
+
+# Results
+
+## Fitting algorithms using the raw (quality) outcome variable
+
+### Model 1 raw: K-nearest neighbours
+
+The first algorithm fitted to the train dataset is the k-nearest neighbours. In order to optimise the parameter _k_, a set of 5 to 100 k-neighbours were trained. 
+
+The figure below shows the results of this process:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+set.seed(123, sample.kind="Rounding")
+
+fit_knn <- train(factor(quality) ~ fixed.acidity + volatile.acidity + citric.acid + residual.sugar +
+                   chlorides + free.sulfur.dioxide + total.sulfur.dioxide + density + pH + 
+                   sulphates + alcohol, method = "knn", 
+                 data = train,
+                 trControl = trainControl(method="cv", number = 5, p = .9),
+                 tuneGrid = data.frame(k = seq(5, 100, 1)))
+
+ggplot(fit_knn, highlight = TRUE)
+
+```
+
+As shown, he parameter _k_ that maximised the estimated accuracy is:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+fit_knn$bestTune #  parameter that maximized the accuracy
+
+```
+
+By fitting this optimised parameter, the model improves the accuracy to:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+y_hat_knn <- predict(fit_knn, test, type = "raw")
+acc_1 <- confusionMatrix(y_hat_knn, factor(test$quality))$overall["Accuracy"]
+acc_1 
+accuracy_models <- tibble(Method = "Model 1 raw: k-nearest neighbours", Accuracy = acc_1) # summary 
+```
+
+The resulted accuracy does no achieve even 50% which means that the k-nearest neighbours does worse than guessing. 
+
+### Model 2 raw: Decision trees
+
+Decision trees can model human decision processes and do not require use of dummy predictors for categorical variables as for traditional regression methods.
+
+Decision trees create partitions recursively starting with one partition or the entire predictor space. They form predictions by calculating which class is the most common among the training set observations within the partition.
+
+In order to optimise the numbers of partitions to be created, the best complexity parameter (cp) can be chosen. By using cross validation, the optimised _cp_ for this algorithm can be selected from the figure below:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(rpart)
+### use cross validation to choose parameter
+set.seed(300, sample.kind="Rounding")
+
+fit_rtree <- train(factor(quality) ~ fixed.acidity + volatile.acidity + citric.acid + residual.sugar +
+                   chlorides + free.sulfur.dioxide + total.sulfur.dioxide + density + pH + 
+                   sulphates + alcohol, data = train,
+                   method = "rpart",
+                   tuneGrid = data.frame(cp = seq(0, 0.05, len = 25)))
+
+ggplot(fit_rtree, highlight = TRUE)
+```
+
+The main idea is that accuracy must improve by a factor of _cp_ for the new partition to be added. The optimised _cp_ is:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+fit_rtree$bestTune$cp # best cp value
+```
+
+The final model using this parameters can be graphically displayed in the figure below. As showed on the figure, the first split is made at alcohol lower than 10.2. The two resulting new partitions are split at volatile acidity higher or equal than 0.2375 and alcohol lower than 11.48, respectively, and so on.
+
+```{r echo=FALSE, fig.height=10, fig.width=14, message=FALSE, warning=FALSE}
+plot(fit_rtree$finalModel, margin = 0.1)
+text(fit_rtree$finalModel, cex = 0.75)
+```
+
+By fitting this optimised algorithm, the model improves the accuracy to:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+y_hat_rtree <- predict(fit_rtree, test)
+acc_2 <- confusionMatrix(y_hat_rtree, factor(test$quality))$overall["Accuracy"]
+acc_2
+
+accuracy_models <- bind_rows(accuracy_models,
+                             tibble(Method="Model 2 raw: Decision tree",
+                                    Accuracy = acc_2)) # summary 
+```
+
+This is better than k-nearest neighbours, but not much improvement from a simple guessing. 
+
+### Model 3 raw: Random forests
+
+Decision trees is rarely the best performing method in terms of accuracy since it is not very flexible and is highly unstable to changes in training data. Random forests improve on several of these shortcomings.The goal is to improve prediction performance and reduce instability by averaging multiple decision trees.
+
+The first step is bootstrap aggregation. The general idea is to generate many predictors, decision trees, and then forming a final prediction based on the average prediction of all these trees. Therefore, the bootstrap makes the individual trees randomly different, and the combination of trees is the forest.
+
+In the first step the parameter that controls the minimum number of data points in the nodes of the tree is optimised using cross validation. The figure below shows the result of this process:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(randomForest)
+set.seed(999, sample.kind="Rounding")
+
+### cross-validation to choose parameter
+
+train_rforest <- train(factor(quality) ~ fixed.acidity + volatile.acidity + citric.acid + residual.sugar +
+                   chlorides + free.sulfur.dioxide + total.sulfur.dioxide + density + pH + 
+                   sulphates + alcohol, 
+                       method = "rf", data = train,
+                       trControl = trainControl(method="cv", number = 5),
+                       tuneGrid = data.frame(mtry = c(1:10))) # optimised algorithm
+ggplot(train_rforest, highlight = TRUE)
+
+```
+
+The optimised parameter is:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+train_rforest$bestTune
+
+```
+
+By fitting the model with this parameter, accuracy improves to:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+fit_rforest <- randomForest(factor(quality) ~ fixed.acidity + volatile.acidity + citric.acid + 
+                              residual.sugar + chlorides + free.sulfur.dioxide + total.sulfur.dioxide +
+                              density + pH + sulphates + alcohol, 
+                   data = train, minNode = train_rforest$bestTune$mtry) # fit final model
+
+y_hat_rforest <- predict(fit_rforest, test)
+acc_3 <- confusionMatrix(y_hat_rforest, factor(test$quality))$overall["Accuracy"]
+acc_3
+accuracy_models <- bind_rows(accuracy_models,
+                             tibble(Method="Model 3 raw: Random forest",
+                                    Accuracy = acc_3)) # summary 
+
+```
+
+By examining the variable importance, it is possible to see how often a predictor is used in the individual trees. As shown on the table below, alcohol, density and volatile acidity receive the highest values:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+fit_rforest$importance %>% knitr::kable("pipe", digits = 2) # importance of each feature
+
+```
+
+Random forest performs the best compare to all the previous algorithms. However, accuracy remains just over 65% which is low.
+
+## Fitting algorithms using the transformed (levels) outcome variable 
+
+The same algorithms were fitted to the transformed outcome variable (levels). Three levels are considered:  * Bad = ratings 1 to 4
+ * Medium = ratings 5 and 6
+ * Good = ratings 7 to 10
+
+The same procedure as in the previous section was implemented in each case.
+
+### Model 1 levels: k-nearest neighbours
+
+In order to optimise the parameter _k_, a set of 5 to 100 k-neighbours were trained and the result is displayed in the figure below:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+set.seed(123, sample.kind="Rounding")
+
+fit_knn_b <- train(levels ~ fixed.acidity + volatile.acidity + citric.acid + residual.sugar +
+                 chlorides + free.sulfur.dioxide + total.sulfur.dioxide + density + pH + 
+                 sulphates + alcohol, method = "knn", 
+                   data = train,
+                   trControl = trainControl(method="cv", number = 5, p = .9),
+                   tuneGrid = data.frame(k = seq(5, 100, 1)))
+
+ggplot(fit_knn_b, highlight = TRUE)
+```
+
+As shown, he parameter _k_ that maximised the estimated accuracy is:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+fit_knn_b$bestTune #  parameter that maximized the accuracy
+```
+
+By fitting this optimised parameter, the model improves the accuracy to:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+y_hat_knn_b <- predict(fit_knn_b, test, type = "raw")
+acc_4 <- confusionMatrix(y_hat_knn_b, factor(test$levels))$overall["Accuracy"]
+acc_4
+accuracy_models <- bind_rows(accuracy_models,
+                             tibble(Method="Model 1 levels: k-nearest neighbours",
+                                    Accuracy = acc_4)) # summary
+```
+
+This is a improvement of almost 30% considered the first implementation of the k-nearest neighbours algorithm. 
+
+
+### Model 2 levels: Decision trees
+
+Following the first implementation of decision trees, the optimised _cp_ can be selected by using cross validation. The figure below shows the result of this procedure:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+library(rpart)
+### use cross validation to choose parameter
+set.seed(300, sample.kind="Rounding")
+
+fit_rtree_b <- train(levels ~ fixed.acidity + volatile.acidity + citric.acid + residual.sugar +
+                     chlorides + free.sulfur.dioxide + total.sulfur.dioxide + density + pH + 
+                     sulphates + alcohol, data = train,
+                     method = "rpart",
+                     tuneGrid = data.frame(cp = seq(0, 0.05, len = 25)))
+
+ggplot(fit_rtree_b, highlight = TRUE)
+```
+
+The optimised _cp_ is:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+fit_rtree_b$bestTune$cp # best cp value
+```
+
+The final model using this parameters can be graphically displayed in the figure below. As showed on the figure, the first split is made at alcohol higher or equal than 10.85. The two resulting new partitions are split at volatile acidity lower than 0.195 and alcohol higher or equal than 12.55, respectively, and so on.
+
+```{r echo=FALSE, fig.height=16, fig.width=12, message=FALSE, warning=FALSE}
+
+plot(fit_rtree_b$finalModel, margin = 0.1)
+text(fit_rtree_b$finalModel, cex = 0.75)
+
+```
+
+By fitting this optimised algorithm, the model improves the accuracy to:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+y_hat_rtree_b <- predict(fit_rtree_b, test)
+acc_5 <- confusionMatrix(y_hat_rtree_b, factor(test$levels))$overall["Accuracy"]
+acc_5
+accuracy_models <- bind_rows(accuracy_models,
+                             tibble(Method="Model 2 levels: Decision tree",
+                                    Accuracy = acc_5)) # summary
+```
+
+This is better than the initial decision trees accuracy and slightly higher than k-nearest neighbours.
+
+
+### Model 3 levels: Random forests
+
+The parameter that controls the minimum number of data points in the nodes of the tree is optimised using cross validation. The figure below shows the result of this process:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(randomForest)
+set.seed(999, sample.kind="Rounding")
+
+### cross validation to choose parameter
+
+train_rforest_b <- train(levels ~ fixed.acidity + volatile.acidity + citric.acid + residual.sugar +
+                         chlorides + free.sulfur.dioxide + total.sulfur.dioxide + density + pH + 
+                         sulphates + alcohol, 
+                   method = "rf", data = train,
+                   trControl = trainControl(method="cv", number = 5),
+                   tuneGrid = data.frame(mtry = c(1:10))) # optimised algorithm
+ggplot(train_rforest_b, highlight = TRUE)
+```
+
+The optimised parameter is:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+train_rforest_b$bestTune
+```
+
+By fitting the model with this parameter, accuracy improves considerably to:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+fit_rforest_b <- randomForest(factor(levels) ~ fixed.acidity + volatile.acidity + citric.acid + residual.sugar +
+                              chlorides + free.sulfur.dioxide + total.sulfur.dioxide + density + pH + 
+                              sulphates + alcohol, data = train, minNode = train_rforest$bestTune$mtry) # fit final model
+
+y_hat_rforest_b <- predict(fit_rforest_b, test)
+acc_6 <- confusionMatrix(y_hat_rforest_b, factor(test$levels))$overall["Accuracy"]
+acc_6
+accuracy_models <- bind_rows(accuracy_models,
+                             tibble(Method="Model 3 levels: Random forest",
+                                    Accuracy = acc_6)) # summary
+```
+
+By examining the variable importance, it is possible to see how often a predictor is used in the individual trees.As shown on the table below, alcohol, density and residual sugar receive the highest values. Residual sugar takes the place of volatile acidity from the first implementation of random forests.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+fit_rforest_b$importance %>% knitr::kable("pipe", digits = 2) # importance of each feature
+```
+
+
+## Validation with the best performing model
+
+Random forest in the second condition where wine quality has been transformed into 3 levels showed the best predictive performance.
+
+The final random forest algorithm is tested in the validation dataset in order to confirm its accuracy. By doing so, the achieve accuracy is:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+y_hat_rforest_validation <- predict(fit_rforest_b, validation)
+acc_validation <- confusionMatrix(y_hat_rforest_validation, factor(validation$levels))$overall["Accuracy"]
+acc_validation
+
+accuracy_models <- bind_rows(accuracy_models,
+                             tibble(Method="Best performing model validation",
+                                    Accuracy = acc_validation)) # summary
+
+```
+
+The resulted accuracy is over 80% and almost the same as the one achieved during training. 
+
+
+# Summary and conclusions
+
+In this work, _k-nearest neighbours_, _decision trees_, and _random forests_ were used to determine dependency of white wine quality on eleven wine characteristic. 
+
+These three algorithms were fitted to the train dataset using wine quality as the outcome variable. Wine quality was used in its _raw_ form (1 to 10 quality ratings) and transformed intro _levels_ (bad, medium, good). 
+
+The table below summarises the results of fitting models to the outcome variable in its two forms: raw and levels. 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+accuracy_models %>% knitr::kable()
+```
+
+By using the raw form of the outcome variable, algorithms achieved a maximum accuracy of about 66%, being random forests the best performing algorithm. 
+
+By transforming the raw outcome variable intro 3 levels, all algorithms achieved a better performance with a maximum accuracy of about 83%. Random forests was again the best performing algorithm.
+
+The final random forest algorithm was tested in the validation dataset in order to confirm its predictive value. The resulted accuracy is close to the one achieved during the training process confirming random forest as the best algorithm. 
+
+## Limitations and future research
+
+The analyses presented in this report have several limitations. The outcome variable did not include very low (1 and 2) and very high (10) ratings. In addition, most observations were concentrated at middle ratings (5, 6 and 7). This may have an impact on the algorithms as prevalence can reduce the predictive capacity by reducing or inflating it. Also, predictors differed greatly regarding their measurement values. This may be inflating the real predictive value of such a predictors. 
+
+Besides dealing with these limitations, future inquiries could explore this dataset in three ways. First, future analyses can consider the outcome variable as a continuous variable and calculate the root-mean-square error (RMSE). This can facilitate features selection. For example, it could start with a linear regression to identify the most important predictors and delete the ones which do not have predictive value. 
+
+Second, future studies can also apply dimension reduction to optimise predictors. This could reduce the impact of collinearity between predictors. This is an aspect which was not explored in the present analysis. 
+
+Finally, a more focused approached could be taken by transforming the outcome variable into two categories such as good and bad or high and low quality. By doing so, the analysis would be more effective at predicting what makes a good quality wine. 
