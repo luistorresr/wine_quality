@@ -1,4 +1,4 @@
-# Wine_quality
+# Wine quality
 
 In this work, three machine learning techniques are used to determine dependency of white wine quality on
 eleven wine characteristic. Machine learning techniques are compared by calculating the level of accuracy of
